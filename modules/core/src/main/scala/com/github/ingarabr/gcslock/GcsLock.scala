@@ -42,7 +42,7 @@ class GcsLock[F[_]: Async](client: GcsLockClient[F]) {
       }
 
     val acquire = for {
-      lock <- strategy.getLock(runAcquire)
+      lock <- strategy.attemptAcquire(runAcquire)
       ref <- Ref.of[F, LockMeta](lock)
       fiber <- refreshLock(ref).start
     } yield fiber.cancel.flatMap(_ => ref.get)
