@@ -38,8 +38,8 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
         ).use(response => {
           response.status match {
             case Status.PreconditionFailed => None.pure[F]
-            case Status.Ok                 => parseResponse(lockId, response).map(_.some)
-            case _                         => createError(response)
+            case Status.Ok => parseResponse(lockId, response).flatMap(_.liftTo[F].map(_.some))
+            case _         => createError(response).flatMap(_.raiseError)
           }
         })
       )
@@ -54,12 +54,12 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
     ).use(res =>
       res.status match {
         case Status.NotFound => None.pure[F]
-        case Status.Ok       => parseResponse(lockId, res).map(_.some)
-        case _               => createError(res)
+        case Status.Ok       => parseResponse(lockId, res).flatMap(_.liftTo[F].map(_.some))
+        case _               => createError(res).flatMap(_.raiseError)
       }
     )
 
-  override def refreshLock(lock: LockMeta, ttl: FiniteDuration): F[LockMeta] =
+  override def refreshLock(lock: LockMeta, ttl: FiniteDuration): F[RefreshStatus] =
     createMetadata(ttl)
       .flatMap(thePatch =>
         c.run(
@@ -70,8 +70,17 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
           ).withEntity(thePatch)
         ).use(response =>
           response.status match {
-            case Status.Ok => Async[F].delay(println(thePatch)) *> parseResponse(lock.id, response)
-            case _         => createError(response)
+            case Status.Ok =>
+              parseResponse(lock.id, response).flatMap {
+                case Left(value)  => RefreshStatus.Error(value).pure[F]
+                case Right(value) => RefreshStatus.Refreshed(value).pure[F]
+              }
+            case Status.NotFound =>
+              RefreshStatus.LockMismatch(lock).pure[F]
+            case Status.PreconditionFailed =>
+              RefreshStatus.LockMismatch(lock).pure[F]
+            case _ =>
+              createError(response).map(value => RefreshStatus.Error(value))
           }
         )
       )
@@ -88,7 +97,7 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
         case Status.NoContent          => true.pure[F]
         case Status.NotFound           => false.pure[F]
         case Status.PreconditionFailed => false.pure[F]
-        case _                         => createError(response)
+        case _                         => createError(response).flatMap(_.raiseError)
       }
     )
 
@@ -103,7 +112,7 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
       response.status match {
         case Status.NoContent => true.pure[F]
         case Status.NotFound  => false.pure[F]
-        case _                => createError(response)
+        case _                => createError(response).flatMap(_.raiseError)
       }
     )
 
@@ -113,10 +122,9 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
   private def basePath(lockId: LockId) =
     uri"https://storage.googleapis.com/storage/v1/b" / lockId.bucket / "o" / lockId.objectName
 
-  private def createError[A](res: Response[F]) =
-    res.bodyText.compile.string.flatMap(body =>
+  private def createError[A](res: Response[F]): F[Throwable] =
+    res.bodyText.compile.string.map(body =>
       new IllegalStateException(show"Unexpected http code: ${res.status} body:\n$body")
-        .raiseError[F, A]
     )
 
   private def multipartHeader(body: Multipart[F]) =
@@ -144,20 +152,18 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
     )
 
   // todo: query param: ?fields=id,name,metadata/key1
-  private def parseResponse(lockId: LockId, res: Response[F]) =
+  private def parseResponse(lockId: LockId, res: Response[F]): F[Either[Throwable, LockMeta]] =
     jsonDecoder
       .decode(res, false)
       .value
       .rethrow
-      .flatMap { json =>
+      .map { json =>
         val cur = json.hcursor
         val lock = for {
           ttl <- cur.downField("metadata").downField("ttl").as[OffsetDateTime]
           gen <- cur.downField("generation").as[Long]
         } yield LockMeta(lockId, ttl, gen)
-        lock.liftTo[F].adaptErr { case err =>
-          new IllegalStateException(s"Input json: ${json.spaces2}", err)
-        }
+        lock.leftMap(err => new IllegalStateException(s"Input json: ${json.spaces2}", err))
       }
 
   extension (u: Uri) {

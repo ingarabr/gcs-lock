@@ -20,26 +20,23 @@ class GcsLockSpec extends CatsEffectSuite {
 
     def runApp(id: Int): IO[Unit] = for {
       _ <- IO.println(s"$id (${startDiff()}): Got lock")
-      _ <- IO.sleep(70.seconds)
+      _ <- IO.sleep(25.seconds)
       _ <- IO.println(s"$id (${startDiff()}): Done")
     } yield ()
 
+    val strategy = Strategy
+      .waitUntilLockIsAvailable[IO](
+        acquireRetryInterval = 5.seconds,
+        lockRefreshInterval = 20.seconds,
+        acquireRetryMaxAttempts = 20
+      )
     val res: IO[Unit] = Http4sGcsLockClientSpec.cloudLock
       .map(GcsLock[IO](_))
       .use(gcsLock =>
         for {
-          f1 <- gcsLock
-            .create(lockId, Strategy.waitUntilLockIsAvailable[IO](acquireRetryInterval = 5.seconds))
-            .use(_ => runApp(1))
-            .start
-          f2 <- gcsLock
-            .create(lockId, Strategy.waitUntilLockIsAvailable[IO](acquireRetryInterval = 5.seconds))
-            .use(_ => runApp(2))
-            .start
-          f3 <- gcsLock
-            .create(lockId, Strategy.waitUntilLockIsAvailable[IO](acquireRetryInterval = 5.seconds))
-            .use(_ => runApp(3))
-            .start
+          f1 <- gcsLock.create(lockId, strategy).use(_ => runApp(1)).start
+          f2 <- gcsLock.create(lockId, strategy).use(_ => runApp(2)).start
+          f3 <- gcsLock.create(lockId, strategy).use(_ => runApp(3)).start
           _ <- List(f1, f2, f3).traverse(_.join)
         } yield ()
       )

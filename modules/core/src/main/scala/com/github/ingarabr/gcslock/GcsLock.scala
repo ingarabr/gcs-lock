@@ -5,12 +5,12 @@ import cats.effect.implicits.{genSpawnOps, genTemporalOps_}
 import cats.effect.kernel.Concurrent
 import cats.syntax.all.*
 import cats.effect.{Async, Ref, Resource}
+import com.github.ingarabr.gcslock.GcsLock.LockAcquireError
 
 class GcsLock[F[_]: Async](client: GcsLockClient[F]) {
 
   def create(id: LockId, strategy: Strategy[F]): Resource[F, Unit] = {
 
-    // todo: ensure we do not fail the thread prematurely
     def refreshLock(lock: Ref[F, LockMeta]): F[Unit] =
       Async[F]
         .sleep(strategy.refreshInterval)
@@ -18,8 +18,23 @@ class GcsLock[F[_]: Async](client: GcsLockClient[F]) {
           Async[F].uncancelable(_ =>
             for {
               oldLock <- lock.get
-              newLock <- client.refreshLock(oldLock, strategy.timeToLive)
-              _ <- lock.set(newLock)
+              status <- strategy.attemptRefresh {
+                client.refreshLock(oldLock, strategy.timeToLive).attempt
+              }
+              _ <-
+                status match {
+                  case RefreshStatus.Refreshed(newLockMeta) => lock.set(newLockMeta)
+                  case RefreshStatus.LockMismatch(oldLockMeta) =>
+                    client.getLock(oldLockMeta.id).flatMap {
+                      case Some(_) =>
+                        LockAcquireError(s"Refresh failed. Lock mismatch").raiseError
+                      case None =>
+                        LockAcquireError("Refresh failed. Lock not found!").raiseError
+                    }
+
+                  case RefreshStatus.Error(err) =>
+                    LockAcquireError("Refresh failed.", err).raiseError
+                }
             } yield ()
           )
         )
@@ -57,4 +72,12 @@ class GcsLock[F[_]: Async](client: GcsLockClient[F]) {
 object GcsLock {
   def apply[F[_]: Async](client: GcsLockClient[F]): GcsLock[F] =
     new GcsLock[F](client)
+
+  class LockAcquireError(msg: String, underlying: Option[Throwable])
+      extends RuntimeException(msg, underlying.orNull)
+
+  object LockAcquireError {
+    def apply(msg: String) = new LockAcquireError(msg, None)
+    def apply(msg: String, err: Throwable) = new LockAcquireError(msg, Some(err))
+  }
 }
