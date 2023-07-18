@@ -3,7 +3,6 @@ import Versions.V
 inThisBuild(
   Seq(
     organization := "com.github.ingarabr",
-    version := "0.0.1-SNAPSHOT",
     scalacOptions += "-no-indent",
     scalaVersion := V.Scala,
     testFrameworks += new TestFramework("munit.Framework"),
@@ -19,6 +18,14 @@ inThisBuild(
     )
   )
 )
+
+lazy val root = (project in file("."))
+  .settings(
+    name := "gcp-lock-root",
+    publish := {},
+    publish / skip := true
+  )
+  .aggregate(core, `cats-retry`, http4s)
 
 lazy val core = (project in file("modules/core"))
   .settings(
