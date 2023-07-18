@@ -5,8 +5,18 @@ inThisBuild(
     organization := "com.github.ingarabr",
     version := "0.0.1-SNAPSHOT",
     scalacOptions += "-no-indent",
-    scalaVersion := "3.2.2",
-    testFrameworks += new TestFramework("munit.Framework")
+    scalaVersion := V.Scala,
+    testFrameworks += new TestFramework("munit.Framework"),
+    homepage := Some(url("https://github.com/ingarabr/gcs-lock")),
+    licenses += ("MIT", url("http://opensource.org/licenses/MIT")),
+    developers := List(
+      Developer(
+        "ingarabr",
+        "Ingar Abrahamsen",
+        "ingar.abrahamasen@gmail.com",
+        url("https://github.com/ingarabr/")
+      )
+    )
   )
 )
 
