@@ -22,6 +22,12 @@ import scala.concurrent.duration.{Duration, FiniteDuration}
 class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredentials)
     extends GcsLockClient[F] {
 
+  private val fields = List(
+    "id",
+    "generation",
+    "metadata/*"
+  )
+
   override def acquireLock(lockId: LockId, ttl: FiniteDuration): F[Option[LockMeta]] =
     createMetadata(ttl)
       .flatMap(createMultipartBody(_))
@@ -32,6 +38,7 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
             uri = uploadUri(lockId)
               .withQueryParam("name", lockId.objectName)
               .withQueryParam("uploadType", "multipart")
+              .withQueryParam("fields", fields.mkString(","))
               .withIfGenerationMatch(0),
             headers = Headers(credentials.authHeader, multipartHeader(body))
           ).withEntity(body)
@@ -48,7 +55,7 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
     c.run(
       Request(
         method = Method.GET,
-        uri = basePath(lockId),
+        uri = basePath(lockId).withQueryParam("fields", fields.mkString(",")),
         headers = Headers(credentials.authHeader)
       )
     ).use(res =>
@@ -65,7 +72,9 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
         c.run(
           Request(
             method = Method.PATCH,
-            uri = basePath(lock.id).withIfGenerationMatch(lock),
+            uri = basePath(lock.id)
+              .withIfGenerationMatch(lock)
+              .withQueryParam("fields", fields.mkString(",")),
             headers = Headers(credentials.authHeader)
           ).withEntity(thePatch)
         ).use(response =>
@@ -151,7 +160,6 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
       )
     )
 
-  // todo: query param: ?fields=id,name,metadata/key1
   private def parseResponse(lockId: LockId, res: Response[F]): F[Either[Throwable, LockMeta]] =
     jsonDecoder
       .decode(res, false)
