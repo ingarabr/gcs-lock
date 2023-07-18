@@ -30,13 +30,16 @@ class GcsLockSpec extends CatsEffectSuite {
         lockRefreshInterval = 20.seconds,
         acquireRetryMaxAttempts = 20
       )
+
+    def owner(id: String) = LockOwner.Resolve(IO.pure(id))
+
     val res: IO[Unit] = Http4sGcsLockClientSpec.cloudLock
       .map(GcsLock[IO](_))
       .use(gcsLock =>
         for {
-          f1 <- gcsLock.create(lockId, strategy).use(_ => runApp(1)).start
-          f2 <- gcsLock.create(lockId, strategy).use(_ => runApp(2)).start
-          f3 <- gcsLock.create(lockId, strategy).use(_ => runApp(3)).start
+          f1 <- gcsLock.create(lockId, owner("f1"), strategy).use(_ => runApp(1)).start
+          f2 <- gcsLock.create(lockId, owner("f2"), strategy).use(_ => runApp(2)).start
+          f3 <- gcsLock.create(lockId, owner("f3"), strategy).use(_ => runApp(3)).start
           _ <- List(f1, f2, f3).traverse(_.join)
         } yield ()
       )

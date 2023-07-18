@@ -9,7 +9,7 @@ import com.github.ingarabr.gcslock.GcsLock.LockAcquireError
 
 class GcsLock[F[_]: Async](client: GcsLockClient[F]) {
 
-  def create(id: LockId, strategy: Strategy[F]): Resource[F, Unit] = {
+  def create(id: LockId, lockOwner: LockOwner[F], strategy: Strategy[F]): Resource[F, Unit] = {
 
     def refreshLock(lock: Ref[F, LockMeta]): F[Unit] =
       Async[F]
@@ -40,7 +40,7 @@ class GcsLock[F[_]: Async](client: GcsLockClient[F]) {
         )
 
     val runAcquire =
-      client.acquireLock(id, strategy.timeToLive).flatMap {
+      client.acquireLock(id, strategy.timeToLive, lockOwner).flatMap {
         case Some(value) => value.some.pure[F]
         case None =>
           client
@@ -48,11 +48,12 @@ class GcsLock[F[_]: Async](client: GcsLockClient[F]) {
             .flatMap {
               case Some(value) =>
                 value.validTTL.flatMap {
-                  case true  => none.pure[F]
-                  case false => client.acquireLock(id, strategy.timeToLive)
+                  case true => none.pure[F]
+                  case false =>
+                    client.acquireLock(id, strategy.timeToLive, lockOwner)
                 }
 
-              case None => client.acquireLock(id, strategy.timeToLive)
+              case None => client.acquireLock(id, strategy.timeToLive, lockOwner)
             }
       }
 

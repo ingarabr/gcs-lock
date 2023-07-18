@@ -28,9 +28,24 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
     "metadata/*"
   )
 
-  override def acquireLock(lockId: LockId, ttl: FiniteDuration): F[Option[LockMeta]] =
+  private def lockBody(lockOwnerIdentifier: LockOwner[F]): Part[F] =
+    lockOwnerIdentifier match {
+      case _: LockOwner.Empty[_] =>
+        Part[F](Headers.empty, fs2.Stream.empty)
+      case LockOwner.Resolve(run) =>
+        Part[F](
+          Headers(`Content-Type`(MediaType.text.plain)),
+          fs2.Stream.eval(run).through(fs2.text.utf8.encode)
+        )
+    }
+
+  override def acquireLock(
+      lockId: LockId,
+      ttl: FiniteDuration,
+      lockOwner: LockOwner[F]
+  ): F[Option[LockMeta]] =
     createMetadata(ttl)
-      .flatMap(createMultipartBody(_))
+      .flatMap(createMultipartBody(_, lockBody(lockOwner)))
       .flatMap(body =>
         c.run(
           Request(
@@ -146,7 +161,7 @@ class Http4sGcsLockClient[F[_]: Async](c: Client[F], credentials: GoogleCredenti
 
   private def createMultipartBody(
       metadata: Json,
-      bodyContent: Part[F] = Part[F](Headers.empty, fs2.Stream.empty)
+      bodyContent: Part[F]
   ): F[Multipart[F]] =
     Multiparts.forSync.flatMap(
       _.multipart(

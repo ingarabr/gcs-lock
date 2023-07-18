@@ -22,7 +22,7 @@ abstract class GcLockClientSpec(cloudLock: Resource[IO, GcsLockClient[IO]])
     val lockId = LockId("ingarabr-lock-test", s"test/create-and-get-$now")
     val value = cloudLock.use(l =>
       for {
-        create <- l.acquireLock(lockId, 1.minute).map(_.map(_.id))
+        create <- l.acquireLock(lockId, 1.minute, LockOwner.empty[IO]).map(_.map(_.id))
         _ <- IO.sleep(1.seconds)
         delete <- l.clearLock(lockId)
         gone <- l.getLock(lockId)
@@ -36,7 +36,7 @@ abstract class GcLockClientSpec(cloudLock: Resource[IO, GcsLockClient[IO]])
     val value = cloudLock.use(l =>
       for {
         create <- l
-          .acquireLock(lockId, 1.minute)
+          .acquireLock(lockId, 1.minute, LockOwner.empty[IO])
           .flatMap(_.liftTo(new IllegalStateException("Failed to acquire lock")))
         _ <- IO.sleep(2.seconds)
         nonMatchingGen <- l.releaseLock(create.copy(generation = create.generation - 1))
@@ -51,13 +51,13 @@ abstract class GcLockClientSpec(cloudLock: Resource[IO, GcsLockClient[IO]])
     val value = cloudLock.use(l =>
       for {
         create <- l
-          .acquireLock(lockId, 1.minute)
+          .acquireLock(lockId, 1.minute, LockOwner.empty[IO])
           .flatMap(_.liftTo(new IllegalStateException("Failed to acquire lock")))
         _ <- IO.sleep(2.seconds)
         refreshed <- l.refreshLock(create, 30.minutes).flatMap {
           case RefreshStatus.Refreshed(newLockMeta) =>
             newLockMeta.pure
-          case RefreshStatus.LockMismatch(oldLockMeta) =>
+          case RefreshStatus.LockMismatch(_) =>
             new IllegalStateException("lock mismatch").raiseError
           case RefreshStatus.Error(err) => err.raiseError
         }
@@ -71,7 +71,7 @@ abstract class GcLockClientSpec(cloudLock: Resource[IO, GcsLockClient[IO]])
     val uniqueLockId = LockId("ingarabr-lock-test", s"test/create-and-get-$now;")
     val value = cloudLock.use(l =>
       for {
-        l1 <- l.acquireLock(uniqueLockId, 1.minute)
+        l1 <- l.acquireLock(uniqueLockId, 1.minute, LockOwner.empty[IO])
         l2 = l.getLock(uniqueLockId)
         _ <- IO.println(l1)
       } yield (l1, l2)
@@ -84,9 +84,9 @@ abstract class GcLockClientSpec(cloudLock: Resource[IO, GcsLockClient[IO]])
     val meta = LockMeta(uniqueLockId, OffsetDateTime.now(), 0L)
     val value = cloudLock.use(l =>
       for {
-        _ <- l.acquireLock(uniqueLockId, 1.minute)
+        _ <- l.acquireLock(uniqueLockId, 1.minute, LockOwner.empty[IO])
         l1 <- l.refreshLock(meta, 1.minute)
-      } yield (l1)
+      } yield l1
     )
     assertIO_(value.assertEquals(RefreshStatus.LockMismatch(meta)))
   }

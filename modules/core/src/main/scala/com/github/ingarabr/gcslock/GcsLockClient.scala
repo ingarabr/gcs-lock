@@ -6,13 +6,18 @@ import cats.effect.{Async, Clock}
 import cats.effect.kernel.Sync
 import cats.syntax.all.*
 
+import java.net.InetAddress
 import java.time.{OffsetDateTime, ZoneId, ZoneOffset}
 import scala.concurrent.duration.{Duration, FiniteDuration}
 
 trait GcsLockClient[F[_]] {
 
   /** Attempt to acquire a lock */
-  def acquireLock(lockId: LockId, ttl: FiniteDuration): F[Option[LockMeta]]
+  def acquireLock(
+      lockId: LockId,
+      ttl: FiniteDuration,
+      lockOwner: LockOwner[F]
+  ): F[Option[LockMeta]]
 
   /** Fetch a lock */
   def getLock(lockId: LockId): F[Option[LockMeta]]
@@ -39,4 +44,38 @@ enum RefreshStatus {
 
   /** Other errors like network issues and so on. */
   case Error(err: Throwable)
+}
+
+/** Opt-in identifier that's stored in the GCS content. It should be a human readable format that
+  * makes it easier to identify the lock owner.
+  *
+  * Some good example on lock owner identifiers:
+  *   - The host name of the machine
+  *   - A kubernetes pod name
+  *   - The node and job name of a Github action run.
+  */
+sealed trait LockOwner[F[_]]
+object LockOwner {
+  class Empty[F[_]] extends LockOwner[F]
+  case class Resolve[F[_]](run: F[String]) extends LockOwner[F]
+
+  def empty[F[_]] = new Empty[F]
+
+  def fromEnv[F[_]: Sync](name: String): LockOwner[F] =
+    Resolve(
+      Sync[F]
+        .delay(sys.env.get(name))
+        .flatMap(
+          _.toRight(new IllegalStateException(show"Environment variable not found: $name"))
+            .liftTo[F]
+        )
+    )
+
+  def fromHostName[F[_]: Sync]: LockOwner[F] =
+    Resolve(
+      Sync[F]
+        .delay(InetAddress.getLocalHost.getHostName)
+        .adaptError { case err => new IllegalStateException(show"Failed to get host name", err) }
+    )
+
 }
