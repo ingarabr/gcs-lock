@@ -24,7 +24,7 @@ class GcsLockSpec extends CatsEffectSuite {
       _ <- IO.println(s"$id (${startDiff()}): Done")
     } yield ()
 
-    val strategy = Strategy
+    val strategy = NoDependencyStrategy
       .waitUntilLockIsAvailable[IO](
         acquireRetryInterval = 5.seconds,
         lockRefreshInterval = 20.seconds,

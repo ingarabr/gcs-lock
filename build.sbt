@@ -19,6 +19,17 @@ lazy val core = (project in file("modules/core"))
       "org.scalameta" %% "munit" % V.Munit % Test
     )
   )
+lazy val `cats-retry` = (project in file("modules/cats-retry"))
+  .dependsOn(core)
+  .settings(
+    name := "gcs-lock-cats-retry",
+    libraryDependencies ++= Seq(
+      "com.github.cb372" %% "cats-retry" % V.CatsRetry,
+      "org.typelevel" %% "cats-effect" % V.CatsEffect,
+      "org.typelevel" %% "munit-cats-effect-3" % V.MunitCatsEffect % Test,
+      "org.scalameta" %% "munit" % V.Munit % Test
+    )
+  )
 
 lazy val http4s = (project in file("modules/http4s"))
   .dependsOn(core)
