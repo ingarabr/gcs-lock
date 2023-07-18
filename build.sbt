@@ -5,7 +5,7 @@ inThisBuild(
     organization := "com.github.ingarabr",
     version := "0.0.1-SNAPSHOT",
     scalacOptions += "-no-indent",
-    scalaVersion := "3.2.2",
+    scalaVersion := V.Scala,
     testFrameworks += new TestFramework("munit.Framework")
   )
 )
